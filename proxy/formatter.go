@@ -30,7 +30,8 @@ type entityFormatter struct {
 func NewEntityFormatter(target string, whitelist, blacklist []string, group string, mappings map[string]string) EntityFormatter {
 	var propertyFilter propertyFilter
 	if len(whitelist) > 0 {
-		propertyFilter = newWhitelistingFilter(whitelist)
+		// propertyFilter = newWhitelistingFilter(whitelist)
+		propertyFilter = newWhitelistFilterByDeletion(whitelist)
 	} else {
 		propertyFilter = newBlacklistingFilter(blacklist)
 	}
@@ -77,6 +78,53 @@ func extractTarget(target string, entity *Response) {
 		}
 	} else {
 		entity.Data = map[string]interface{}{}
+	}
+}
+
+func newWhiteListDict(whitelist []string) map[string]interface{} {
+	wlDict := make(map[string]interface{})
+	for _, k := range whitelist {
+		wlFields := strings.Split(k, ".")
+		d := buildDictPath(wlDict, wlFields[:len(wlFields)-1])
+		d[wlFields[len(wlFields)-1]] = true
+	}
+	return wlDict
+}
+
+func whitelistByDeletionPrune(wlDict map[string]interface{}, inDict map[string]interface{}) bool {
+	canDelete := true
+	for k, v := range inDict {
+		if subWl, ok := wlDict[k]; ok {
+			if subWlDict, okk := subWl.(map[string]interface{}); okk {
+				if subInDict, isDict := v.(map[string]interface{}); isDict {
+					if !whitelistByDeletionPrune(subWlDict, subInDict) {
+						canDelete = false
+					} else {
+						delete(inDict, k)
+					}
+				} else {
+					delete(inDict, k)
+				}
+			} else {
+				// we found the whitelist leaf, and should maintain this branch
+				canDelete = false
+			}
+		} else {
+			delete(inDict, k)
+		}
+	}
+	return canDelete
+}
+
+func newWhitelistFilterByDeletion(whitelist []string) propertyFilter {
+	wlDict := newWhiteListDict(whitelist)
+
+	return func(entity *Response) {
+		if whitelistByDeletionPrune(wlDict, entity.Data) {
+			for k := range entity.Data {
+				delete(entity.Data, k)
+			}
+		}
 	}
 }
 
